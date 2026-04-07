@@ -1,0 +1,20 @@
+[package]
+name = "task_invocation_cron_kernel"
+version = "0.1.0"
+edition = "2021"
+authors = ["0xBoji <0xbojissd@gmail.com>"]
+description = "RAI Pillar 10: Task Invocation Cron Kernel - Mesh-aware distributed orchestration"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json"] }
+anyhow = "1.0"
+uuid = { version = "1.4", features = ["v4", "serde"] }
+governor = "0.6" # For rate-limiting dispatch
+tracing = "0.1"
+tracing-subscriber = "0.3"
+directories = "5.0"
