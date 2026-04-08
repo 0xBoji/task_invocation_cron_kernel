@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
-coding_agent_mesh_presence = { path = "../coding_agent_mesh_presence" }
+coding_agent_mesh_presence = "0.1.6"
 directories = "5.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
