@@ -29,6 +29,13 @@ pub enum TickCommand {
     },
     /// Add a new cron job to the persisted scheduler config.
     Add(AddCommand),
+    /// List all persisted jobs.
+    List,
+    /// Inspect a specific persisted job.
+    Inspect {
+        /// Job identifier to inspect.
+        job_id: uuid::Uuid,
+    },
 }
 
 #[derive(Args, Debug, Clone)]

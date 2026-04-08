@@ -24,6 +24,39 @@ async fn main() -> Result<()> {
                 println!("added job {}", job.id);
             }
         }
+        TickCommand::List => {
+            let jobs = store.list_jobs()?;
+            if cli.json {
+                println!("{}", serde_json::to_string(&jobs)?);
+            } else {
+                for job in jobs {
+                    println!(
+                        "{} {:?} {:?} {}",
+                        job.id,
+                        job.policy,
+                        job.mode(),
+                        job.command_preview()
+                    );
+                }
+            }
+        }
+        TickCommand::Inspect { job_id } => {
+            let job = store.find_job(job_id)?;
+            if cli.json {
+                println!("{}", serde_json::to_string(&job)?);
+            } else {
+                match job {
+                    Some(job) => println!(
+                        "{} {:?} {:?} {}",
+                        job.id,
+                        job.policy,
+                        job.mode(),
+                        job.command_preview()
+                    ),
+                    None => println!("job {} not found", job_id),
+                }
+            }
+        }
         TickCommand::Daemon { sync_interval_ms } => {
             let engine = SchedulerEngine::new(
                 CampMeshProvider::from_env().await?,

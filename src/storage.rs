@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
 use crate::models::ScheduledJob;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct JobStore {
@@ -56,6 +57,10 @@ impl JobStore {
 
         serde_json::from_str(&raw)
             .with_context(|| format!("failed to parse `{}`", self.jobs_file.display()))
+    }
+
+    pub fn find_job(&self, job_id: Uuid) -> Result<Option<ScheduledJob>> {
+        Ok(self.list_jobs()?.into_iter().find(|job| job.id == job_id))
     }
 
     fn write_jobs(&self, jobs: &[ScheduledJob]) -> Result<()> {
