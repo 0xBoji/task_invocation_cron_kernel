@@ -1,6 +1,23 @@
 # TICK — Task Invocation Cron Kernel
 
+![TICK banner](docs/assets/tick-banner.svg)
+
+<p align="left">
+  <img alt="language" src="https://img.shields.io/badge/language-Rust-000000?logo=rust&logoColor=white">
+  <img alt="binary" src="https://img.shields.io/badge/bin-tick-1d4ed8">
+  <img alt="scheduler" src="https://img.shields.io/badge/scheduler-cron%20mesh-7c3aed">
+  <img alt="execution" src="https://img.shields.io/badge/execution-wasm%20%2B%20shell-0f766e">
+  <img alt="events" src="https://img.shields.io/badge/output-JSON-0ea5e9">
+  <img alt="persistence" src="https://img.shields.io/badge/persistence-tick__jobs.json-f59e0b">
+</p>
+
 > Mesh-aware distributed cron scheduling for the Rust Agent Infrastructure (RAI).
+
+> **Install in one line**
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/0xBoji/task_invocation_cron_kernel/main/scripts/install.sh | bash
+> ```
 
 TICK is the orchestration pillar of the RAI ecosystem. It exists to answer one simple operational question:
 
@@ -28,6 +45,7 @@ This keeps the scheduler:
   - [Cargo install from git](#cargo-install-from-git)
   - [Build from source](#build-from-source)
 - [Quick start](#quick-start)
+- [Banner, badges, and sample output](#banner-badges-and-sample-output)
 - [Command reference](#command-reference)
   - [`tick daemon`](#tick-daemon)
   - [`tick add`](#tick-add)
@@ -219,6 +237,40 @@ The compiled binary will be at:
 ```
 
 ---
+
+## Banner, badges, and sample output
+
+### Install banner
+
+The README now leads with a visual banner plus a copy-paste install block so the project reads like a real installable tool instead of a source-only repo.
+
+### Badge strip
+
+The badges intentionally communicate the operational shape of TICK at a glance:
+
+- Rust implementation
+- `tick` binary identity
+- cron + mesh scheduling focus
+- wasm + shell execution support
+- JSON-first event output
+- lightweight JSON persistence
+
+### Screenshot / log sample
+
+Below is a terminal-style sample asset showing the sort of JSON event stream VIEW is expected to consume.
+
+![TICK sample event stream](docs/assets/tick-log-sample.svg)
+
+And here is the same idea as raw log text for easy copy/paste:
+
+```json
+{"rai_component":"tick","rai_level":"info","event":"daemon_started","message":"tick daemon started and watching persisted jobs"}
+{"rai_component":"tick","rai_level":"info","event":"job_triggered","execution_policy":"mesh_any","job_mode":"wasm"}
+{"rai_component":"tick","rai_level":"info","event":"job_dispatched","selected_agent_id":"agent-a","selected_agent_local":true}
+{"rai_component":"tick","rai_level":"warn","event":"job_skipped","message":"no idle agent matched role and policy"}
+{"rai_component":"tick","rai_level":"info","event":"remote_dispatch_simulated","selected_agent_id":"agent-remote-01"}
+{"rai_component":"tick","rai_level":"error","event":"job_failed","message":"failed to query CAMP mesh"}
+```
 
 ## Quick start
 
