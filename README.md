@@ -257,9 +257,9 @@ The badges intentionally communicate the operational shape of TICK at a glance:
 
 ### Screenshot / log sample
 
-Below is a terminal-style sample asset showing the sort of JSON event stream VIEW is expected to consume.
+Below is a terminal-style PNG screenshot showing the sort of JSON event stream VIEW is expected to consume without SVG text overflow.
 
-![TICK sample event stream](docs/assets/tick-log-sample.svg)
+![TICK sample event stream](docs/assets/tick-log-screenshot.png)
 
 And here is the same idea as raw log text for easy copy/paste:
 
