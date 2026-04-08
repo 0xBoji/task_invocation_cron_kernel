@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["0xBoji <0xbojissd@gmail.com>"]
 description = "RAI Pillar 5: Task Invocation Cron Kernel - mesh-aware distributed cron scheduling"
+readme = "README.md"
+repository = "https://github.com/0xBoji/task_invocation_cron_kernel"
 
 [[bin]]
 name = "tick"
