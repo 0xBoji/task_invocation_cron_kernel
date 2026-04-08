@@ -13,8 +13,6 @@
 
 > Mesh-aware distributed cron scheduling for the Rust Agent Infrastructure (RAI).
 
-![TICK install banner](docs/assets/tick-install-banner.svg)
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0xBoji/task_invocation_cron_kernel/main/scripts/install.sh | bash
 ```
