@@ -1,56 +1,36 @@
 use clap::{Parser, Subcommand};
-use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(name = "tick")]
 #[command(bin_name = "tick")]
-#[command(about = "RAI Pillar 10: Task Invocation Cron Kernel", long_about = None)]
+#[command(about = "Mesh-aware distributed cron scheduler for the RAI ecosystem")]
 pub struct TickCli {
     #[command(subcommand)]
     pub command: TickCommand,
 
-    /// Global flag to emit JSON only.
-    #[arg(short, long, global = true)]
+    /// Emit JSON responses for one-shot commands.
+    #[arg(long, global = true)]
     pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum TickCommand {
-    /// Starts the orchestration daemon. 🛰️
-    Start {
-        /// Interval to poll the mesh (seconds).
-        #[arg(short, long, default_value = "5")]
-        interval: u64,
+    /// Start the background scheduler daemon.
+    Daemon {
+        /// How often the daemon rescans persisted jobs for newly added entries.
+        #[arg(long, default_value_t = 2_000)]
+        sync_interval_ms: u64,
     },
-
-    /// Schedules a new task. 📅
-    Schedule {
-        /// Task name.
-        #[arg(short, long)]
-        name: String,
-
-        /// Command to execute (e.g. 'wasp run task.wasm').
-        #[arg(short, long)]
-        command: String,
-
-        /// Optional cron schedule (e.g. '*/5 * * * *').
-        #[arg(short, long)]
-        schedule: Option<String>,
+    /// Add a new cron job to the persisted scheduler config.
+    Add {
+        /// Cron expression in tokio-cron-scheduler format.
+        #[arg(long)]
+        cron: String,
+        /// Agent role that must be idle before dispatching.
+        #[arg(long)]
+        role: String,
+        /// Command payload to dispatch when the trigger fires.
+        #[arg(long)]
+        cmd: String,
     },
-
-    /// Lists all tasks in the queue. 📋
-    List {
-        /// Show only tasks with the given status.
-        #[arg(short, long)]
-        status: Option<String>,
-    },
-
-    /// Cancels a pending or running task. 🚫
-    Cancel {
-        /// The UUID of the task to cancel.
-        id: Uuid,
-    },
-
-    /// Clears all completed or failed tasks. 🧹
-    Clean,
 }

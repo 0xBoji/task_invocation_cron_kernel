@@ -1,63 +1,31 @@
-mod cli;
-mod engine;
-mod models;
-mod output;
+use std::time::Duration;
 
+use anyhow::Result;
 use clap::Parser;
-use cli::{TickCli, TickCommand};
-use engine::Orchestrator;
-use output::TickResponse;
+use task_invocation_cron_kernel::{
+    cli::{TickCli, TickCommand},
+    engine::TickDaemon,
+    output::TickResponse,
+    storage::JobStore,
+};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let cli = TickCli::parse();
-    let orchestrator = Orchestrator::new()?;
+    let store = JobStore::from_env_or_default()?;
 
     match cli.command {
-        TickCommand::Schedule { name, command, schedule } => {
-            match orchestrator.schedule_task(name, command, schedule) {
-                Ok(task) => {
-                    if cli.json {
-                        TickResponse::success("Task scheduled", Some(task)).print_json();
-                    } else {
-                        println!("📅 Task scheduled with ID: {}", task.id);
-                    }
-                }
-                Err(e) => {
-                    if cli.json {
-                        TickResponse::error(e.to_string()).print_json();
-                    } else {
-                        eprintln!("❌ Error scheduling task: {}", e);
-                    }
-                }
+        TickCommand::Add { cron, role, cmd } => {
+            let job = store.add_job(cron, role, cmd)?;
+            if cli.json {
+                TickResponse::JobAdded { job }.print_json()?;
+            } else {
+                println!("added job {}", job.id);
             }
         }
-        TickCommand::List { status } => {
-            match orchestrator.list_tasks(status) {
-                Ok(tasks) => {
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&tasks)?);
-                    } else {
-                        println!("📋 Current Tasks:");
-                        for t in tasks {
-                            println!("[{:?}] {}: {} (Assigned: {:?})", t.status, t.id, t.name, t.assigned_agent);
-                        }
-                    }
-                }
-                Err(e) => {
-                    if cli.json {
-                        TickResponse::error(e.to_string()).print_json();
-                    } else {
-                        eprintln!("❌ Error listing tasks: {}", e);
-                    }
-                }
-            }
-        }
-        TickCommand::Start { interval } => {
-            orchestrator.run_loop(interval).await?;
-        }
-        _ => {
-            println!("Command logic for 'cancel' and 'clean' coming in Phase 2.");
+        TickCommand::Daemon { sync_interval_ms } => {
+            let daemon = TickDaemon::new(store, Duration::from_millis(sync_interval_ms));
+            daemon.run().await?;
         }
     }
 

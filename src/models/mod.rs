@@ -1,45 +1,56 @@
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use tokio_cron_scheduler::Job;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum TaskStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
+pub struct ScheduledJob {
     pub id: Uuid,
-    pub name: String,
-    pub command: String,
-    pub status: TaskStatus,
+    pub cron: String,
+    pub role: String,
+    pub cmd: String,
     pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub schedule: Option<String>, // Cron expression
-    pub last_run: Option<DateTime<Utc>>,
-    pub assigned_agent: Option<String>,
-    pub result: Option<serde_json::Value>,
 }
 
-impl Task {
-    pub fn new(name: String, command: String, schedule: Option<String>) -> Self {
-        let now = Utc::now();
+impl ScheduledJob {
+    #[must_use]
+    pub fn new(cron: String, role: String, cmd: String) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name,
-            command,
-            status: TaskStatus::Pending,
-            created_at: now,
-            updated_at: now,
-            schedule,
-            last_run: None,
-            assigned_agent: None,
-            result: None,
+            cron,
+            role,
+            cmd,
+            created_at: Utc::now(),
         }
     }
+
+    #[must_use]
+    pub fn new_for_test(cron: &str, role: &str, cmd: &str) -> Self {
+        Self::new(cron.to_owned(), role.to_owned(), cmd.to_owned())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MeshAgent {
+    pub id: String,
+    pub role: String,
+    pub status: String,
+}
+
+impl MeshAgent {
+    #[must_use]
+    pub fn new(id: &str, role: &str, status: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            role: role.to_owned(),
+            status: status.to_owned(),
+        }
+    }
+}
+
+pub fn validate_cron_expression(expression: &str) -> Result<()> {
+    Job::new_async(expression, |_job_id, _scheduler| Box::pin(async {}))
+        .map(|_| ())
+        .with_context(|| format!("invalid cron expression `{expression}`"))
 }
