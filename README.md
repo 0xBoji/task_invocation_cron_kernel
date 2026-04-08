@@ -13,11 +13,11 @@
 
 > Mesh-aware distributed cron scheduling for the Rust Agent Infrastructure (RAI).
 
-> **Install in one line**
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/0xBoji/task_invocation_cron_kernel/main/scripts/install.sh | bash
-> ```
+![TICK install banner](docs/assets/tick-install-banner.svg)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0xBoji/task_invocation_cron_kernel/main/scripts/install.sh | bash
+```
 
 TICK is the orchestration pillar of the RAI ecosystem. It exists to answer one simple operational question:
 

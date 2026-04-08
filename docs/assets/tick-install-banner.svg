@@ -1,0 +1,21 @@
+<svg width="1280" height="260" viewBox="0 0 1280 260" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#08111F"/>
+      <stop offset="1" stop-color="#13203D"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="84" y1="72" x2="1196" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="260" rx="24" fill="url(#bg)"/>
+  <rect x="28" y="28" width="1224" height="204" rx="18" stroke="url(#stroke)" stroke-width="2"/>
+
+  <text x="72" y="88" fill="#BFD0FF" font-family="Inter, ui-sans-serif, system-ui" font-size="24" font-weight="700">INSTALL TICK IN ONE LINE</text>
+  <text x="72" y="126" fill="#93C5FD" font-family="Inter, ui-sans-serif, system-ui" font-size="20">Requires Rust/Cargo + Git. Installs the latest main branch via cargo install.</text>
+
+  <rect x="72" y="152" width="1136" height="56" rx="14" fill="#050B16" stroke="#253456"/>
+  <text x="98" y="188" fill="#67E8F9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24">curl -fsSL https://raw.githubusercontent.com/0xBoji/task_invocation_cron_kernel/main/scripts/install.sh | bash</text>
+</svg>
