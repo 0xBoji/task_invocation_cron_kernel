@@ -4,7 +4,8 @@ use anyhow::Result;
 use clap::Parser;
 use task_invocation_cron_kernel::{
     cli::{TickCli, TickCommand},
-    engine::TickDaemon,
+    engine::{LocalDispatcher, SchedulerEngine, TickDaemon},
+    mesh::CampMeshProvider,
     output::TickResponse,
     storage::JobStore,
 };
@@ -15,8 +16,8 @@ async fn main() -> Result<()> {
     let store = JobStore::from_env_or_default()?;
 
     match cli.command {
-        TickCommand::Add { cron, role, cmd } => {
-            let job = store.add_job(cron, role, cmd)?;
+        TickCommand::Add(add) => {
+            let job = store.add_job(add.into_job()?)?;
             if cli.json {
                 TickResponse::JobAdded { job }.print_json()?;
             } else {
@@ -24,7 +25,11 @@ async fn main() -> Result<()> {
             }
         }
         TickCommand::Daemon { sync_interval_ms } => {
-            let daemon = TickDaemon::new(store, Duration::from_millis(sync_interval_ms));
+            let engine = SchedulerEngine::new(
+                CampMeshProvider::from_env().await?,
+                LocalDispatcher::default(),
+            );
+            let daemon = TickDaemon::new(store, engine, Duration::from_millis(sync_interval_ms));
             daemon.run().await?;
         }
     }

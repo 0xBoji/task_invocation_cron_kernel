@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
-use crate::models::{validate_cron_expression, ScheduledJob};
+use crate::models::ScheduledJob;
 
 #[derive(Debug, Clone)]
 pub struct JobStore {
@@ -30,7 +30,7 @@ impl JobStore {
         fs::create_dir_all(root)
             .with_context(|| format!("failed to create data dir `{}`", root.display()))?;
 
-        let jobs_file = root.join("jobs.json");
+        let jobs_file = root.join("tick_jobs.json");
         if !jobs_file.exists() {
             fs::write(&jobs_file, "[]")
                 .with_context(|| format!("failed to initialize `{}`", jobs_file.display()))?;
@@ -39,11 +39,8 @@ impl JobStore {
         Ok(Self { jobs_file })
     }
 
-    pub fn add_job(&self, cron: String, role: String, cmd: String) -> Result<ScheduledJob> {
-        validate_cron_expression(&cron)?;
-
+    pub fn add_job(&self, job: ScheduledJob) -> Result<ScheduledJob> {
         let mut jobs = self.list_jobs()?;
-        let job = ScheduledJob::new(cron, role, cmd);
         jobs.push(job.clone());
         self.write_jobs(&jobs)?;
         Ok(job)
@@ -71,6 +68,7 @@ impl JobStore {
 #[cfg(test)]
 mod tests {
     use super::JobStore;
+    use crate::models::{ExecutionPolicy, JobType, ScheduledJob, WasmJob};
     use uuid::Uuid;
 
     #[test]
@@ -79,11 +77,17 @@ mod tests {
         let store = JobStore::new_in(&root).expect("store should initialize");
 
         let job = store
-            .add_job(
+            .add_job(ScheduledJob::new(
                 "*/5 * * * * *".to_owned(),
                 "coder".to_owned(),
-                "echo hi".to_owned(),
-            )
+                ExecutionPolicy::MeshAny,
+                JobType::Wasm(WasmJob {
+                    module: "./jobs/task.wasm".to_owned(),
+                    args: Vec::new(),
+                    allow_dirs: Vec::new(),
+                    env: Vec::new(),
+                }),
+            ))
             .expect("job should persist");
 
         let jobs = store.list_jobs().expect("jobs should load");

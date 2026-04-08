@@ -1,23 +1,37 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
 use tokio::time;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use uuid::Uuid;
 
 use crate::{
-    mesh::CampMesh,
-    models::{MeshAgent, ScheduledJob},
+    models::{ExecutionPolicy, JobType, MeshAgent, ScheduledJob},
     output::TickEvent,
     storage::JobStore,
 };
 
 pub use crate::models::validate_cron_expression;
+
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+pub trait MeshProvider: Send + Sync {
+    fn local_agent_id(&self) -> Option<&str>;
+    fn list_agents<'a>(&'a self) -> BoxFuture<'a, Result<Vec<MeshAgent>>>;
+    fn shutdown<'a>(&'a self) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+pub trait Dispatcher: Send + Sync {
+    fn dispatch_local<'a>(&'a self, job: &'a ScheduledJob) -> BoxFuture<'a, Result<String>>;
+}
 
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: &TickEvent) -> Result<()>;
@@ -33,61 +47,194 @@ impl EventSink for StdoutEventSink {
     }
 }
 
-pub fn select_idle_agent<'a>(agents: &'a [MeshAgent], role: &str) -> Option<&'a MeshAgent> {
-    agents
-        .iter()
-        .find(|agent| agent.role == role && agent.status.eq_ignore_ascii_case("idle"))
+#[derive(Debug, Clone)]
+pub struct LocalDispatcher {
+    wasp_bin: String,
 }
 
-pub fn build_trigger_event(
-    job: &ScheduledJob,
-    agents: &[MeshAgent],
-    at: chrono::DateTime<Utc>,
-) -> TickEvent {
-    match select_idle_agent(agents, &job.role) {
-        Some(agent) => TickEvent::for_job(
-            "info",
-            "job_dispatched",
-            at,
-            job,
-            Some(agent.id.clone()),
-            format!(
-                "dispatched `{}` to idle agent `{}` for role `{}`",
-                job.cmd, agent.id, job.role
-            ),
-        ),
-        None => TickEvent::for_job(
-            "warn",
-            "job_skipped",
-            at,
-            job,
-            None,
-            format!(
-                "skipped trigger because no idle agent was available for role `{}`",
-                job.role
-            ),
-        ),
+impl Default for LocalDispatcher {
+    fn default() -> Self {
+        Self {
+            wasp_bin: std::env::var("TICK_WASP_BIN").unwrap_or_else(|_| "wasp".to_owned()),
+        }
     }
 }
 
-pub struct TickDaemon {
+impl Dispatcher for LocalDispatcher {
+    fn dispatch_local<'a>(&'a self, job: &'a ScheduledJob) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            match &job.job_type {
+                JobType::Wasm(wasm) => {
+                    if !wasm.args.is_empty() {
+                        anyhow::bail!(
+                            "wasm guest args are not supported by `wasp run` yet; remove args or use --mode shell"
+                        );
+                    }
+
+                    let mut command = tokio::process::Command::new(&self.wasp_bin);
+                    command.arg("run").arg(&wasm.module);
+                    for allow_dir in &wasm.allow_dirs {
+                        command.arg("--allow-dir").arg(allow_dir);
+                    }
+                    for env in &wasm.env {
+                        command.arg("--env").arg(env.as_cli_pair());
+                    }
+
+                    let output = command
+                        .output()
+                        .await
+                        .with_context(|| format!("failed to spawn `{}`", self.wasp_bin))?;
+                    let preview = job.command_preview();
+                    if !output.status.success() {
+                        anyhow::bail!(
+                            "local wasp dispatch failed with status {}: {}",
+                            output.status,
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        );
+                    }
+                    Ok(preview)
+                }
+                JobType::Shell(shell) => {
+                    let mut command = tokio::process::Command::new(&shell.command);
+                    command.args(&shell.args);
+                    let output = command
+                        .output()
+                        .await
+                        .with_context(|| format!("failed to spawn `{}`", shell.command))?;
+                    let preview = job.command_preview();
+                    if !output.status.success() {
+                        anyhow::bail!(
+                            "local shell dispatch failed with status {}: {}",
+                            output.status,
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        );
+                    }
+                    Ok(preview)
+                }
+            }
+        })
+    }
+}
+
+pub struct SchedulerEngine<M, D> {
+    mesh_provider: M,
+    dispatcher: D,
+    round_robin_state: Mutex<HashMap<Uuid, usize>>,
+}
+
+impl<M, D> SchedulerEngine<M, D>
+where
+    M: MeshProvider,
+    D: Dispatcher,
+{
+    pub fn new(mesh_provider: M, dispatcher: D) -> Self {
+        Self {
+            mesh_provider,
+            dispatcher,
+            round_robin_state: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn evaluate_job(&self, job: &ScheduledJob) -> TickEvent {
+        let agents = match self.mesh_provider.list_agents().await {
+            Ok(agents) => agents,
+            Err(error) => {
+                return TickEvent::job_failed(
+                    job,
+                    None,
+                    None,
+                    Some(job.command_preview()),
+                    format!("failed to query CAMP mesh: {error}"),
+                );
+            }
+        };
+
+        let local_agent_id = self.mesh_provider.local_agent_id().map(str::to_owned);
+        let candidates = match eligible_candidates(job, agents, local_agent_id.as_deref()) {
+            Ok(candidates) => candidates,
+            Err(error) => {
+                return TickEvent::job_failed(
+                    job,
+                    None,
+                    None,
+                    Some(job.command_preview()),
+                    error.to_string(),
+                );
+            }
+        };
+
+        if candidates.is_empty() {
+            return TickEvent::job_skipped(
+                job,
+                format!(
+                    "skipped trigger because no idle agent matched role `{}` and policy `{:?}`",
+                    job.role, job.policy
+                ),
+            );
+        }
+
+        let selected = select_round_robin_candidate(job.id, &candidates, &self.round_robin_state);
+        let selected_is_local = local_agent_id
+            .as_deref()
+            .is_some_and(|agent_id| agent_id == selected.id);
+
+        if selected_is_local {
+            match self.dispatcher.dispatch_local(job).await {
+                Ok(command_preview) => TickEvent::job_dispatched(
+                    job,
+                    selected.id.clone(),
+                    true,
+                    command_preview,
+                    format!(
+                        "dispatched job locally to idle agent `{}` using {:?}",
+                        selected.id,
+                        job.mode()
+                    ),
+                ),
+                Err(error) => TickEvent::job_failed(
+                    job,
+                    Some(selected.id.clone()),
+                    Some(true),
+                    Some(job.command_preview()),
+                    format!("local dispatch failed: {error}"),
+                ),
+            }
+        } else {
+            TickEvent::remote_dispatch_simulated(
+                job,
+                selected.id.clone(),
+                format!("[TICK] Simulating remote dispatch to agent {}", selected.id),
+            )
+        }
+    }
+
+    pub fn local_agent_id(&self) -> Option<&str> {
+        self.mesh_provider.local_agent_id()
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        self.mesh_provider.shutdown().await
+    }
+}
+
+pub struct TickDaemon<M, D> {
     store: Arc<Mutex<JobStore>>,
-    mesh: CampMesh,
+    engine: Arc<SchedulerEngine<M, D>>,
     sink: Arc<dyn EventSink>,
     sync_interval: Duration,
     scheduled_jobs: Arc<Mutex<HashSet<Uuid>>>,
 }
 
-impl TickDaemon {
-    pub fn new(store: JobStore, sync_interval: Duration) -> Self {
-        Self::with_sink(store, Arc::new(StdoutEventSink), sync_interval)
-    }
-
-    pub fn with_sink(store: JobStore, sink: Arc<dyn EventSink>, sync_interval: Duration) -> Self {
+impl<M, D> TickDaemon<M, D>
+where
+    M: MeshProvider + 'static,
+    D: Dispatcher + 'static,
+{
+    pub fn new(store: JobStore, engine: SchedulerEngine<M, D>, sync_interval: Duration) -> Self {
         Self {
             store: Arc::new(Mutex::new(store)),
-            mesh: CampMesh::default(),
-            sink,
+            engine: Arc::new(engine),
+            sink: Arc::new(StdoutEventSink),
             sync_interval,
             scheduled_jobs: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -96,11 +243,11 @@ impl TickDaemon {
     pub async fn run(&self) -> Result<()> {
         let mut scheduler = JobScheduler::new().await?;
         self.sync_jobs(&scheduler).await?;
-        self.sink.emit(&TickEvent::daemon(
+        self.emit(&TickEvent::daemon(
             "info",
             "daemon_started",
             "tick daemon started and watching persisted jobs",
-        ))?;
+        ));
         scheduler.start().await?;
 
         let mut interval = time::interval(self.sync_interval);
@@ -108,17 +255,24 @@ impl TickDaemon {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => break,
                 _ = interval.tick() => {
-                    self.sync_jobs(&scheduler).await?;
+                    if let Err(error) = self.sync_jobs(&scheduler).await {
+                        self.emit(&TickEvent::daemon(
+                            "error",
+                            "job_sync_failed",
+                            format!("failed to sync jobs: {error}"),
+                        ));
+                    }
                 }
             }
         }
 
         scheduler.shutdown().await?;
-        self.sink.emit(&TickEvent::daemon(
+        self.engine.shutdown().await?;
+        self.emit(&TickEvent::daemon(
             "info",
             "daemon_stopped",
             "tick daemon stopped",
-        ))?;
+        ));
         Ok(())
     }
 
@@ -147,30 +301,22 @@ impl TickDaemon {
     }
 
     async fn schedule_job(&self, scheduler: &JobScheduler, job: ScheduledJob) -> Result<()> {
-        let mesh = self.mesh.clone();
-        let sink = Arc::clone(&self.sink);
         let cron = job.cron.clone();
+        let engine = Arc::clone(&self.engine);
+        let sink = Arc::clone(&self.sink);
         let job_for_schedule = job.clone();
 
         let scheduled_job = Job::new_async(&cron, move |_job_id, _scheduler| {
-            let mesh = mesh.clone();
+            let engine = Arc::clone(&engine);
             let sink = Arc::clone(&sink);
             let job = job_for_schedule.clone();
             Box::pin(async move {
-                let event = match mesh.fetch_agents().await {
-                    Ok(agents) => build_trigger_event(&job, &agents, Utc::now()),
-                    Err(error) => TickEvent::for_job(
-                        "error",
-                        "job_failed",
-                        Utc::now(),
-                        &job,
-                        None,
-                        format!("failed to query mesh before dispatch: {error}"),
-                    ),
-                };
-
+                if let Err(error) = sink.emit(&TickEvent::job_triggered(&job)) {
+                    eprintln!("tick: failed to emit trigger event: {error}");
+                }
+                let event = engine.evaluate_job(&job).await;
                 if let Err(error) = sink.emit(&event) {
-                    eprintln!("tick: failed to emit event: {error}");
+                    eprintln!("tick: failed to emit job event: {error}");
                 }
             })
         })
@@ -183,31 +329,52 @@ impl TickDaemon {
 
         Ok(())
     }
+
+    fn emit(&self, event: &TickEvent) {
+        if let Err(error) = self.sink.emit(event) {
+            eprintln!("tick: failed to emit daemon event: {error}");
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{build_trigger_event, select_idle_agent, validate_cron_expression};
-    use crate::models::{MeshAgent, ScheduledJob};
+fn eligible_candidates(
+    job: &ScheduledJob,
+    agents: Vec<MeshAgent>,
+    local_agent_id: Option<&str>,
+) -> Result<Vec<MeshAgent>> {
+    let mut candidates = agents
+        .into_iter()
+        .filter(|agent| agent.role == job.role && agent.status.eq_ignore_ascii_case("idle"))
+        .collect::<Vec<_>>();
 
-    #[test]
-    fn cron_validation_accepts_six_field_expression() {
-        validate_cron_expression("*/5 * * * * *").expect("valid cron should pass");
+    match job.policy {
+        ExecutionPolicy::MeshAny => {}
+        ExecutionPolicy::LocalOnly => {
+            let local_agent_id = local_agent_id.ok_or_else(|| {
+                anyhow!("cannot enforce local_only without a known local agent id")
+            })?;
+            candidates.retain(|agent| agent.id == local_agent_id);
+        }
+        ExecutionPolicy::RemoteOnly => {
+            let local_agent_id = local_agent_id.ok_or_else(|| {
+                anyhow!("cannot enforce remote_only without a known local agent id")
+            })?;
+            candidates.retain(|agent| agent.id != local_agent_id);
+        }
     }
 
-    #[test]
-    fn select_idle_agent_returns_none_when_all_busy() {
-        let agents = vec![MeshAgent::new("agent-1", "coder", "busy")];
-        assert!(select_idle_agent(&agents, "coder").is_none());
-    }
+    candidates.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(candidates)
+}
 
-    #[test]
-    fn build_trigger_event_reports_dispatch() {
-        let job = ScheduledJob::new_for_test("*/5 * * * * *", "coder", "echo hi");
-        let agents = vec![MeshAgent::new("agent-1", "coder", "idle")];
-
-        let event = build_trigger_event(&job, &agents, chrono::Utc::now());
-        assert_eq!(event.event, "job_dispatched");
-        assert_eq!(event.selected_agent_id.as_deref(), Some("agent-1"));
-    }
+fn select_round_robin_candidate(
+    job_id: Uuid,
+    candidates: &[MeshAgent],
+    state: &Mutex<HashMap<Uuid, usize>>,
+) -> MeshAgent {
+    let mut state = state.lock().expect("round-robin state mutex poisoned");
+    let next_index = state.entry(job_id).or_insert(0);
+    let selected = candidates[*next_index % candidates.len()].clone();
+    *next_index = (*next_index + 1) % candidates.len();
+    selected
 }

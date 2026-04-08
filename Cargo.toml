@@ -13,9 +13,11 @@ path = "src/main.rs"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
+coding_agent_mesh_presence = { path = "../coding_agent_mesh_presence" }
 directories = "5.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-cron-scheduler = "0.15.1"
+toml = "0.9.7"
 uuid = { version = "1.4", features = ["serde", "v4"] }
